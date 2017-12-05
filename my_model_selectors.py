@@ -113,8 +113,11 @@ class SelectorDIC(ModelSelector):
     https://pdfs.semanticscholar.org/ed3d/7c4a5f607201f3848d4c02dd9ba17c791fc2.pdf
     DIC = log(P(X(i)) - 1/(M-1)SUM(log(P(X(all but i))
     '''
+    result_dict = None
 
     def prepare(self):
+        if SelectorDIC.result_dict is not None:
+            return SelectorDIC.result_dict
         result_dict = {}
         for n in range(self.min_n_components, self.max_n_components + 1):
             for w in self.words:
@@ -128,6 +131,7 @@ class SelectorDIC(ModelSelector):
                 except:
                     result_dict[(w, n)] = (None, float("-inf"))
 
+                SelectorDIC.result_dict = result_dict
         return result_dict
 
     def select(self):
@@ -166,13 +170,20 @@ class SelectorCV(ModelSelector):
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        split_method = KFold(5)
+
 
         max_cv = float("-inf")
         max_model = None
+        spl = 3
 
         for n in range(self.min_n_components, self.max_n_components + 1):
             res = []
+
+            if len(self.sequences) < spl:
+                break
+
+            split_method = KFold(spl)
+
             for train, test in split_method.split(self.sequences):
                 X_test, lengths_test = combine_sequences(test, self.sequences)
                 X_train, lengths_train = combine_sequences(train, self.sequences)
@@ -186,7 +197,7 @@ class SelectorCV(ModelSelector):
                 except:
                     continue
 
-            if len(res > 0):
+            if len(res) > 0:
                 avg = np.average(res)
 
                 if avg > max_cv:
