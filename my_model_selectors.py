@@ -75,9 +75,33 @@ class SelectorBIC(ModelSelector):
         :return: GaussianHMM object
         """
         warnings.filterwarnings("ignore", category=DeprecationWarning)
+        min_score = float("inf")
+        min_model = None
 
-        # TODO implement model selection based on BIC scores
-        raise NotImplementedError
+        for n in range(self.min_n_components, self.max_n_components + 1):
+            try:
+                model = self.base_model(n)
+                score = model.score(self.X, self.lengths)
+
+                n_features = len(self.X[0])
+                transition_numbers = n * (n - 1)
+
+                n_params = transition_numbers + 2 * n_features * n
+
+                logN = np.log(len(self.X))
+
+                current_bic = -2 * score + n_params * logN
+                if current_bic < min_score:
+                    min_score = current_bic
+                    min_model = model
+
+            except:
+                continue
+
+        if min_model is None:
+            return self.base_model(self.n_constant)
+
+        return min_model
 
 
 class SelectorDIC(ModelSelector):
@@ -90,11 +114,48 @@ class SelectorDIC(ModelSelector):
     DIC = log(P(X(i)) - 1/(M-1)SUM(log(P(X(all but i))
     '''
 
+    def prepare(self):
+        result_dict = {}
+        for n in range(self.min_n_components, self.max_n_components + 1):
+            for w in self.words:
+                X, lengths = self.hwords[w]
+
+                try:
+                    word_model = GaussianHMM(n_components=n, covariance_type="diag", n_iter=1000,
+                                             random_state=self.random_state, verbose=False).fit(X, lengths)
+                    word_score = word_model.score(X, lengths)
+                    result_dict[(w, n)] = (word_model, word_score)
+                except:
+                    result_dict[(w, n)] = (None, float("-inf"))
+
+        return result_dict
+
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+        max_dic = float("-inf")
+        max_model = None
+
+        dict = self.prepare()
+
+        for n in range(self.min_n_components, self.max_n_components + 1):
+            try:
+                current_word_key = (self.this_word, n)
+                current_word_score = dict[current_word_key][1]
+
+                others = [w for w in self.words if w is not self.this_word]
+                dic = current_word_score - np.mean([dict[(w, n)][1] for w in others if dict[(w, n)][0] is not None])
+
+                if dic > max_dic:
+                    max_dic = dic
+                    max_model = dict[current_word_key][0]
+            except:
+                continue
+
+        if max_model is None:
+            return self.base_model(self.n_constant)
+
+        return max_model
 
 
 class SelectorCV(ModelSelector):
@@ -105,5 +166,34 @@ class SelectorCV(ModelSelector):
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection using CV
-        raise NotImplementedError
+        split_method = KFold(5)
+
+        max_cv = float("-inf")
+        max_model = None
+
+        for n in range(self.min_n_components, self.max_n_components + 1):
+            res = []
+            for train, test in split_method.split(self.sequences):
+                X_test, lengths_test = combine_sequences(test, self.sequences)
+                X_train, lengths_train = combine_sequences(train, self.sequences)
+
+                try:
+                    word_model = GaussianHMM(n_components=n, covariance_type="diag", n_iter=1000,
+                                             random_state=self.random_state, verbose=False).fit(X_train, lengths_train)
+
+                    word_score = word_model.score(X_test, lengths_test)
+                    res.append(word_score)
+                except:
+                    continue
+
+            if len(res > 0):
+                avg = np.average(res)
+
+                if avg > max_cv:
+                    max_cv = avg
+                    max_model = word_model
+
+        if max_model is None:
+            return self.base_model(self.n_constant)
+
+        return max_model
